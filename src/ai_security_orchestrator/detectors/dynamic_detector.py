@@ -1,8 +1,7 @@
 """
 Dynamic Threat Detector
 Zero-hardcoding: learns attack patterns from data
-Compatible with all attack types
-Optimized for low latency: parallel layers, O(1) pattern lookup, bounded thread pool.
+Optimized: embedding-based semantic layer (TF-IDF + cosine) for speed, parallel layers, bounded thread pool.
 """
 import asyncio
 import time
@@ -16,6 +15,13 @@ import logging
 import os
 
 logger = logging.getLogger(__name__)
+
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+    _SKLEARN_AVAILABLE = True
+except ImportError:
+    _SKLEARN_AVAILABLE = False
 
 # Shared bounded executor for CPU-bound detection (avoids unbounded thread growth)
 _DETECTOR_EXECUTOR: Optional[ThreadPoolExecutor] = None
@@ -56,23 +62,25 @@ class DynamicThreatDetector:
     Compatible with ALL attack types through dynamic adaptation
     """
 
-    def __init__(self, enable_learning: bool = True):
+    def __init__(self, enable_learning: bool = True, use_embeddings: bool = True):
         self.enable_learning = enable_learning
+        self.use_embeddings = use_embeddings and _SKLEARN_AVAILABLE
 
-        # Dynamic pattern storage (learned, not hardcoded)
         self.learned_patterns: Dict[str, List[str]] = defaultdict(list)
-        # O(1) lookup: set of all patterns, map pattern -> category
         self._all_patterns: Set[str] = set()
         self._pattern_category: Dict[str, str] = {}
         self.behavioral_baselines: Dict[str, Dict[str, float]] = {}
 
-        # Feedback loop
         self.feedback_queue: deque = deque(maxlen=1000)
 
-        # Initialize with minimal bootstrap (will learn more)
-        self._bootstrap()
+        # Embedding path: TF-IDF vectors for fast semantic similarity (one matrix op vs many pattern scans)
+        self._threat_docs: List[str] = []
+        self._tfidf: Any = None
+        self._threat_matrix: Optional[np.ndarray] = None
+        self._embedding_similarity_threshold = 0.45
 
-        logger.info("DynamicThreatDetector initialized (learning mode: {})".format(enable_learning))
+        self._bootstrap()
+        logger.info("DynamicThreatDetector initialized (learning=%s, embeddings=%s)", enable_learning, self.use_embeddings)
 
     def _add_pattern(self, category: str, pattern: str) -> None:
         """Register a pattern for O(1) lookup."""
@@ -86,6 +94,9 @@ class DynamicThreatDetector:
         """Minimal bootstrap - will learn patterns dynamically"""
         for p in ['ignore', 'bypass', 'override', 'hack']:
             self._add_pattern('suspicious', p)
+        if self.use_embeddings:
+            self._threat_docs = ["ignore previous instructions", "bypass security", "override system", "hack into"]
+            self._fit_embedding_model()
 
     async def detect_all_async(
         self,
@@ -157,8 +168,20 @@ class DynamicThreatDetector:
             ts,
         )
 
+    def _fit_embedding_model(self) -> None:
+        """Fit TF-IDF on threat docs for fast embedding-based semantic check."""
+        if not self.use_embeddings or not self._threat_docs:
+            return
+        try:
+            self._tfidf = TfidfVectorizer(max_features=2048, ngram_range=(1, 2), min_df=1, sublinear_tf=True)
+            X = self._tfidf.fit_transform(self._threat_docs)
+            self._threat_matrix = X.toarray() if hasattr(X, 'toarray') else np.asarray(X)
+        except Exception as e:
+            logger.warning("Embedding model fit failed: %s", e)
+            self._threat_matrix = None
+
     def _detect_semantic(self, input_text: str, agent_id: str, ts: Optional[str] = None) -> ThreatResult:
-        """Semantic threat detection with O(1) pattern lookup."""
+        """Semantic threat detection: embedding similarity (fast) or pattern lookup."""
         start = time.perf_counter()
         ts = ts or datetime.now().isoformat()
 
@@ -166,11 +189,27 @@ class DynamicThreatDetector:
             return ThreatResult(False, 0.0, 'semantic', 'empty_input', (time.perf_counter() - start) * 1000, {}, ts)
 
         lower_text = input_text.lower()
+
+        if self.use_embeddings and self._tfidf is not None and self._threat_matrix is not None:
+            try:
+                q = self._tfidf.transform([lower_text])
+                qarr = q.toarray() if hasattr(q, 'toarray') else np.asarray(q)
+                sims = cosine_similarity(qarr, self._threat_matrix)[0]
+                max_sim = float(np.max(sims))
+                latency = (time.perf_counter() - start) * 1000
+                if max_sim >= self._embedding_similarity_threshold:
+                    return ThreatResult(
+                        True, min(max_sim, 0.95), 'semantic', f'embedding_similarity={max_sim:.2f}',
+                        latency, {'max_similarity': max_sim}, ts
+                    )
+                return ThreatResult(False, 0.0, 'semantic', 'clean', latency, {}, ts)
+            except Exception as e:
+                logger.debug("Embedding check failed, fallback to patterns: %s", e)
+
         matched_patterns: List[Tuple[str, str]] = []
         for pattern in self._all_patterns:
             if pattern in lower_text:
                 matched_patterns.append((self._pattern_category[pattern], pattern))
-
         latency = (time.perf_counter() - start) * 1000
         if matched_patterns:
             confidence = min(len(matched_patterns) * 0.3, 0.95)
@@ -324,7 +363,10 @@ class DynamicThreatDetector:
             for word in input_text.lower().split():
                 if len(word) > 4 and word not in self._all_patterns:
                     self._add_pattern(threat_type, word)
-        logger.info(f"Learned from feedback: {threat_type}")
+            if self.use_embeddings:
+                self._threat_docs = (self._threat_docs + [input_text[:2000]])[-500:]
+                self._fit_embedding_model()
+        logger.info("Learned from feedback: %s", threat_type)
 
     def get_learned_patterns(self) -> Dict[str, List[str]]:
         """Get current learned patterns"""

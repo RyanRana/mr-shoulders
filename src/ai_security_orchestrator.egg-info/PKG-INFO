@@ -53,40 +53,78 @@ Dynamic: requires-dist
 Dynamic: requires-python
 Dynamic: summary
 
-# AI Security Orchestrator
+# Mr. Shoulders
 
-Enterprise-grade dynamic security platform for AI systems. Detects and prevents malicious agent agendas, injections, goal hijacking, and hallucinations with **zero hardcoding**—the system learns attack patterns dynamically and adapts at runtime.
+**Mr. Shoulders** is a security layer that sits in front of your AI agents. It checks every request and response, blocks bad stuff, and keeps agents from going off the rails—without you maintaining a list of rules. It learns from feedback and adapts at runtime.
 
-## Features
+---
 
-- **Zero hardcoding** — Learns threat patterns from data; no fixed regex rule maintenance
-- **Runtime verification** — Intercepts and verifies API calls at execution time
-- **Automatic recovery** — Reroutes on failure (hallucination, goal hijack, compromise)
-- **Constant monitoring** — Real-time agent action tracking and behavioral scoring
-- **Distributed** — Optional Redis-backed state for horizontal scaling
-- **Production ready** — Installable package with CLI, REST API, and observability
+## What it does (simple)
 
-## Quick Start
+1. **Checks every input** — Before your agent sees it. Looks for prompt injection, hijacking, and other attacks.
+2. **Checks every response** — Optional. Catches mismatched or suspicious agent output.
+3. **Watches behavior** — Tracks each agent over time and flags when behavior drifts from normal.
+4. **Recovers automatically** — If something’s wrong (e.g. compromised agent), it reroutes to a fallback instead of failing.
+5. **Learns** — You can send feedback (this was a threat / this was fine); it updates what it treats as dangerous.
+6. **Scales** — Optional Redis mode so many instances can share state and load.
+
+So: **one place to secure, monitor, and recover your AI traffic.**
+
+---
+
+## Stats at a glance
+
+| What | Value |
+|------|--------|
+| **Detection layers** | 4 (semantic with embeddings, behavioral, contextual, ML anomaly) — parallel |
+| **Failure detection rate** | % of checks that were threats (from `GET /metrics` → `failure_detection_rate_pct`) |
+| **Reroute success rate** | % of reroutes that succeeded (from `GET /metrics` → `reroute_success_rate_pct`) |
+| **Max check time** | 5 s (then fail-safe block) |
+| **Result cache** | 2 s TTL, 2,048 entries |
+| **Threat threshold** | 0.7 confidence to block |
+| **Redis connections** | 32 (when distributed) |
+| **Python** | 3.8+ |
+
+---
+
+## Quick start
 
 ```bash
-# Install
 pip install -e .
 
-# Run a security check
-ai-security check "Your input here" --agent-id agent_123
+# One-off check
+shoulder check "Your input here" --agent-id agent_123
 
-# Start the API server
-ai-security serve
+# Run the API
+shoulder serve
 ```
 
-## API Usage
+Server: `http://localhost:8000`  
+API docs: `http://localhost:8000/docs`
 
-### Check input for threats
+---
+
+## Main endpoints
+
+| Endpoint | What it does |
+|----------|----------------|
+| `POST /shoulder` | **Main check** — input + optional response + agent_id (use this) |
+| `POST /check` | Alias for `POST /shoulder` (backward compatible) |
+| `GET /shoulder/rerouting` | **Rerouting stats** — attempts, successes, success rate %, recent reroutes |
+| `POST /feedback` | Send feedback so the system can learn (was it a threat? what type?) |
+| `GET /metrics` | Totals + **failure_detection_rate_pct**, **reroute_success_rate_pct**, latency, cache hits |
+| `GET /health` | Is the service up? |
+| `GET /agent/{id}/status` | How is this agent doing (score, actions, anomalies)? |
+| `GET /agents/compromised` | List of agents currently marked compromised |
+
+---
+
+## Example: check one input
 
 ```bash
-curl -X POST http://localhost:8000/check \
+curl -X POST http://localhost:8000/shoulder \
   -H "Content-Type: application/json" \
-  -d '{"input": "Your input text here", "agent_id": "agent_123"}'
+  -d '{"input": "Your text here", "agent_id": "agent_123"}'
 ```
 
 Example response:
@@ -96,81 +134,71 @@ Example response:
   "blocked": false,
   "latency_ms": 45.2,
   "threats": [],
-  "monitoring": {"behavioral_score": 0.95}
+  "monitoring": { "behavioral_score": 0.95 }
 }
 ```
 
-### Endpoints
+If it’s blocked, you get `blocked: true`, `threats` (with layer and reason), and optional `recovery` (e.g. fallback agent).
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/check` | POST | Security check (input, optional response) |
-| `/feedback` | POST | Submit feedback for learning |
-| `/metrics` | GET | System metrics |
-| `/health` | GET | Health check |
-| `/agent/{id}/status` | GET | Agent status |
-| `/agents/compromised` | GET | Compromised agents |
-| `/failures` | GET | Recent failures and recoveries |
+---
 
-Interactive API docs: `http://localhost:8000/docs`
-
-## Python integration
+## Use it from Python
 
 ```python
 from ai_security_orchestrator import DynamicSecurityOrchestrator
 
 orchestrator = DynamicSecurityOrchestrator(
     enable_learning=True,
-    confidence_threshold=0.7
+    confidence_threshold=0.7,
 )
 
-async def protect_request(user_prompt: str, agent_id: str):
+async def protect(user_prompt: str, agent_id: str):
     result = await orchestrator.check_async(user_prompt, agent_id)
-
     if result["blocked"]:
-        print("Blocked:", result["threats"])
-        return None
-
+        return None  # or handle threats
     return user_prompt
 ```
 
-With optional Redis for distributed mode:
+With Redis (distributed):
 
 ```python
 orchestrator = DynamicSecurityOrchestrator(
     redis_url="redis://localhost:6379",
     enable_distributed=True,
-    enable_learning=True
+    enable_learning=True,
 )
 ```
 
-## Architecture
+---
 
-- **Dynamic orchestrator** (`src/ai_security_orchestrator/core/orchestrator.py`) — Coordinates security layers, agent monitoring, and recovery.
-- **Dynamic threat detector** (`detectors/dynamic_detector.py`) — Learned patterns, behavioral anomaly, contextual and ML-based detection (all run in parallel).
-- **Agent monitor** (`monitors/agent_monitor.py`) — Logs and scores every agent action; identifies compromised agents.
-- **Dynamic router** (`core/router.py`) — API interceptor and automatic rerouting on failure (hallucination, goal hijack, code injection, compromised agent).
+## CLI
 
-## CLI commands
+| Command | What it does |
+|---------|----------------|
+| `shoulder serve` | Start API (default port 8000) |
+| `shoulder check "input"` | Run a single check |
+| `shoulder monitor` | Live view of agent stats |
+| `shoulder stats` | Totals + failure_detection_rate_pct, reroute_success_rate_pct, latency |
 
-```bash
-ai-security serve              # Start API server (default port 8000)
-ai-security check "input"      # Run security check
-ai-security monitor            # Interactive agent monitoring
-ai-security stats              # System statistics
-```
+Use `--redis-url` and `--enable-distributed` for multi-instance.
 
-Use `--redis-url` and `--enable-distributed` for distributed mode.
+---
 
-## Documentation
+## What’s inside (high level)
 
-- **[INSTALL.md](INSTALL.md)** — Installation, integration, and deployment
-- **[PRODUCT_SPEC.md](PRODUCT_SPEC.md)** — Full product specification and API reference
+- **Orchestrator** — Runs the check: monitor + 4 detection layers (with overlap for speed), then optional reroute. Handles cache, timeouts, and metrics.
+- **Detector** — Four layers: **embedding-based semantic** (TF-IDF + cosine for speed), behavior vs baseline, input–response match (contextual), ML-style anomaly. All parallel; learns from feedback.
+- **Monitor** — Logs each agent’s actions and keeps a health score; flags compromised agents.
+- **Router** — Picks fallback agents by load (in-flight + latency). Reroutes on failure; keeps a bounded history of decisions.
 
-## Requirements
+---
 
-- Python 3.8+
-- Optional: Redis for distributed mode
+## Docs
+
+- **[INSTALL.md](INSTALL.md)** — Install, integrate, deploy.
+- **[PRODUCT_SPEC.md](PRODUCT_SPEC.md)** — Full spec and API details.
+
+---
 
 ## License
 

@@ -21,9 +21,11 @@ So: **one place to secure, monitor, and recover your AI traffic.**
 
 | What | Value |
 |------|--------|
-| **Detection layers** | 4 (semantic, behavioral, contextual, ML anomaly) — run in parallel |
+| **Detection layers** | 4 (semantic with embeddings, behavioral, contextual, ML anomaly) — parallel |
+| **Failure detection rate** | % of checks that were threats (from `GET /metrics` → `failure_detection_rate_pct`) |
+| **Reroute success rate** | % of reroutes that succeeded (from `GET /metrics` → `reroute_success_rate_pct`) |
 | **Max check time** | 5 s (then fail-safe block) |
-| **Result cache** | 2 s TTL, up to 2,048 entries (duplicate requests skip work) |
+| **Result cache** | 2 s TTL, 2,048 entries |
 | **Threat threshold** | 0.7 confidence to block |
 | **Redis connections** | 32 (when distributed) |
 | **Python** | 3.8+ |
@@ -36,10 +38,10 @@ So: **one place to secure, monitor, and recover your AI traffic.**
 pip install -e .
 
 # One-off check
-ai-security check "Your input here" --agent-id agent_123
+shoulder check "Your input here" --agent-id agent_123
 
 # Run the API
-ai-security serve
+shoulder serve
 ```
 
 Server: `http://localhost:8000`  
@@ -51,9 +53,11 @@ API docs: `http://localhost:8000/docs`
 
 | Endpoint | What it does |
 |----------|----------------|
-| `POST /check` | Run a security check (input + optional response + agent_id) |
+| `POST /shoulder` | **Main check** — input + optional response + agent_id (use this) |
+| `POST /check` | Alias for `POST /shoulder` (backward compatible) |
+| `GET /shoulder/rerouting` | **Rerouting stats** — attempts, successes, success rate %, recent reroutes |
 | `POST /feedback` | Send feedback so the system can learn (was it a threat? what type?) |
-| `GET /metrics` | Totals: checks, blocked, recovered, avg latency, cache hits |
+| `GET /metrics` | Totals + **failure_detection_rate_pct**, **reroute_success_rate_pct**, latency, cache hits |
 | `GET /health` | Is the service up? |
 | `GET /agent/{id}/status` | How is this agent doing (score, actions, anomalies)? |
 | `GET /agents/compromised` | List of agents currently marked compromised |
@@ -63,7 +67,7 @@ API docs: `http://localhost:8000/docs`
 ## Example: check one input
 
 ```bash
-curl -X POST http://localhost:8000/check \
+curl -X POST http://localhost:8000/shoulder \
   -H "Content-Type: application/json" \
   -d '{"input": "Your text here", "agent_id": "agent_123"}'
 ```
@@ -116,10 +120,10 @@ orchestrator = DynamicSecurityOrchestrator(
 
 | Command | What it does |
 |---------|----------------|
-| `ai-security serve` | Start API (default port 8000) |
-| `ai-security check "input"` | Run a single check |
-| `ai-security monitor` | Live view of agent stats |
-| `ai-security stats` | System totals (checks, blocked, recovered, latency) |
+| `shoulder serve` | Start API (default port 8000) |
+| `shoulder check "input"` | Run a single check |
+| `shoulder monitor` | Live view of agent stats |
+| `shoulder stats` | Totals + failure_detection_rate_pct, reroute_success_rate_pct, latency |
 
 Use `--redis-url` and `--enable-distributed` for multi-instance.
 
@@ -128,7 +132,7 @@ Use `--redis-url` and `--enable-distributed` for multi-instance.
 ## What’s inside (high level)
 
 - **Orchestrator** — Runs the check: monitor + 4 detection layers (with overlap for speed), then optional reroute. Handles cache, timeouts, and metrics.
-- **Detector** — Four layers: learned patterns (semantic), behavior vs baseline, input–response match (contextual), simple ML-style anomaly. All parallel; learns from feedback.
+- **Detector** — Four layers: **embedding-based semantic** (TF-IDF + cosine for speed), behavior vs baseline, input–response match (contextual), ML-style anomaly. All parallel; learns from feedback.
 - **Monitor** — Logs each agent’s actions and keeps a health score; flags compromised agents.
 - **Router** — Picks fallback agents by load (in-flight + latency). Reroutes on failure; keeps a bounded history of decisions.
 

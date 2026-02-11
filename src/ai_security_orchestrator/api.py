@@ -1,6 +1,6 @@
 """
-FastAPI Application for AI Security Orchestrator
-Provides REST API for security checks with request timeout and optional cache.
+Mr. Shoulders – FastAPI REST API
+Main check: POST /shoulder. Rerouting stats: GET /shoulder/rerouting.
 """
 import asyncio
 import logging
@@ -15,19 +15,17 @@ from .monitors.agent_monitor import AgentMonitor
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_REQUEST_TIMEOUT_SEC = DEFAULT_CHECK_TIMEOUT_MS / 1000.0 + 1.0  # Slightly above orchestrator timeout
+DEFAULT_REQUEST_TIMEOUT_SEC = DEFAULT_CHECK_TIMEOUT_MS / 1000.0 + 1.0
 
 
 class SecurityCheckRequest(BaseModel):
-    """Security check request model"""
     input: str
-    agent_id: str = 'default'
+    agent_id: str = "default"
     response: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
 
 
 class FeedbackRequest(BaseModel):
-    """Learning feedback request"""
     input: str
     was_threat: bool
     threat_type: str
@@ -39,39 +37,65 @@ def create_app(
     enable_learning: bool = True,
     request_timeout_sec: float = DEFAULT_REQUEST_TIMEOUT_SEC,
 ) -> FastAPI:
-    """Create FastAPI application with optional request timeout."""
     app = FastAPI(
-        title="AI Security Orchestrator",
+        title="Mr. Shoulders",
         version="2.0.0",
-        description="Enterprise-grade dynamic AI security",
+        description="Security layer for AI agents – check, monitor, reroute.",
     )
     orchestrator = DynamicSecurityOrchestrator(
         redis_url=redis_url,
         enable_distributed=enable_distributed,
         enable_learning=enable_learning,
     )
-    logger.info("AI Security Orchestrator initialized")
+    logger.info("Mr. Shoulders API initialized")
 
-    @app.post("/check")
-    async def check_security(request: SecurityCheckRequest):
-        """Security check with bounded latency (timeout)."""
+    async def _run_shoulder(req: SecurityCheckRequest):
+        return await asyncio.wait_for(
+            orchestrator.check_async(
+                input_text=req.input,
+                agent_id=req.agent_id,
+                response=req.response,
+                context=req.context,
+            ),
+            timeout=request_timeout_sec,
+        )
+
+    @app.post("/shoulder")
+    async def shoulder(request: SecurityCheckRequest):
+        """Main security check (input + optional response, agent_id)."""
         try:
-            result = await asyncio.wait_for(
-                orchestrator.check_async(
-                    input_text=request.input,
-                    agent_id=request.agent_id,
-                    response=request.response,
-                    context=request.context,
-                ),
-                timeout=request_timeout_sec,
-            )
+            result = await _run_shoulder(request)
             return JSONResponse(content=result)
         except asyncio.TimeoutError:
             logger.warning("Request timeout after %.1fs", request_timeout_sec)
             raise HTTPException(status_code=504, detail="Security check timeout")
         except Exception as e:
-            logger.error("Error in security check: %s", e, exc_info=True)
+            logger.error("Error in shoulder check: %s", e, exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/check")
+    async def check(request: SecurityCheckRequest):
+        """Alias for POST /shoulder (backward compatible)."""
+        try:
+            result = await _run_shoulder(request)
+            return JSONResponse(content=result)
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="Security check timeout")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/shoulder/rerouting")
+    async def shoulder_rerouting(limit: int = 50):
+        """Rerouting stats: attempts, successes, success rate, recent reroutes."""
+        orchestrator._lazy_load_components()
+        m = orchestrator.get_metrics()
+        history = orchestrator._router.get_routing_history(limit=limit)
+        return {
+            "reroutes_attempted": m.get("reroutes_attempted", 0),
+            "reroutes_successful": m.get("failures_recovered", 0),
+            "reroute_success_rate_pct": m.get("reroute_success_rate_pct", 100.0),
+            "recent_reroutes": history,
+        }
 
     @app.post("/feedback")
     async def submit_feedback(request: FeedbackRequest):

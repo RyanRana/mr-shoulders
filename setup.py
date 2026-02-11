@@ -65,7 +65,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "ai-security=ai_security_orchestrator.cli:main",
+            "shoulder=ai_security_orchestrator.cli:main",
         ],
     },
     include_package_data=True,

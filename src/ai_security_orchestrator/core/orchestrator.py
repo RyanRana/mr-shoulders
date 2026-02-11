@@ -131,6 +131,7 @@ class DynamicSecurityOrchestrator:
             'threats_blocked': 0,
             'false_positives': 0,
             'failures_recovered': 0,
+            'reroutes_attempted': 0,
             'avg_latency_ms': 0.0,
             'cache_hits': 0,
         }
@@ -250,6 +251,7 @@ class DynamicSecurityOrchestrator:
 
             recovery_result = None
             if self._needs_rerouting(threat_results):
+                self.metrics['reroutes_attempted'] = self.metrics.get('reroutes_attempted', 0) + 1
                 recovery_result = await self._router.reroute(
                     agent_id=agent_id,
                     threats=threat_results,
@@ -393,14 +395,19 @@ class DynamicSecurityOrchestrator:
             logger.error(f"Failed to publish to Redis: {e}")
 
     def get_metrics(self) -> Dict[str, Any]:
-        """Get current metrics"""
-        return {
-            **self.metrics,
-            'action_log_size': len(self.action_log),
-            'failure_log_size': len(self.failure_log),
-            'distributed_mode': self.enable_distributed,
-            'learning_enabled': self.enable_learning
-        }
+        """Get current metrics with percentage stats."""
+        m = dict(self.metrics)
+        total = m.get('total_checks') or 0
+        blocked = m.get('threats_blocked') or 0
+        reroutes = m.get('reroutes_attempted') or 0
+        recovered = m.get('failures_recovered') or 0
+        m['failure_detection_rate_pct'] = round((blocked / total * 100.0), 2) if total else 0.0
+        m['reroute_success_rate_pct'] = round((recovered / reroutes * 100.0), 2) if reroutes else 100.0
+        m['action_log_size'] = len(self.action_log)
+        m['failure_log_size'] = len(self.failure_log)
+        m['distributed_mode'] = self.enable_distributed
+        m['learning_enabled'] = self.enable_learning
+        return m
 
     def get_agent_history(self, agent_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         """Get action history for specific agent"""

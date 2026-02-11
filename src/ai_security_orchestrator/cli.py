@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 @click.group()
 @click.version_option(version='2.0.0')
 def main():
-    """AI Security Orchestrator CLI"""
+    """Mr. Shoulders CLI – shoulder serve | shoulder check | shoulder monitor | shoulder stats"""
     pass
 
 
@@ -33,7 +33,7 @@ def main():
 @click.option('--enable-learning/--no-learning', default=True)
 def serve(host, port, workers, redis_url, enable_distributed, enable_learning):
     """Start the security server"""
-    click.echo(f"Starting AI Security Orchestrator on {host}:{port}")
+    click.echo(f"Starting Mr. Shoulders on {host}:{port}")
     click.echo(f"Workers: {workers}")
     click.echo(f"Distributed: {enable_distributed}")
     click.echo(f"Learning: {enable_learning}")
