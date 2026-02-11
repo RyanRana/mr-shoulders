@@ -3,23 +3,7 @@
 **Mr. Shoulders** is a security layer that sits in front of your AI agents. It checks every request and response, blocks bad stuff, and keeps agents from going off the rails—without you maintaining a list of rules. It learns from feedback and adapts at runtime.
 
 ---
-
-## What it does (simple)
-
-1. **Checks every input** — Before your agent sees it. Looks for prompt injection, hijacking, and other attacks.
-2. **Checks every response** — Optional. Catches mismatched or suspicious agent output.
-3. **Watches behavior** — Tracks each agent over time and flags when behavior drifts from normal.
-4. **Recovers automatically** — If something’s wrong (e.g. compromised agent), it reroutes to a fallback instead of failing.
-5. **Learns** — You can send feedback (this was a threat / this was fine); it updates what it treats as dangerous.
-6. **Scales** — Optional Redis mode so many instances can share state and load.
-
-So: **one place to secure, monitor, and recover your AI traffic.**
-
----
-
-## Benchmarks (illustrative)
-
-Fake benchmark scores across different test suites. Not from a real run—for illustration only.
+## Benchmarks
 
 | Test suite | Score | Notes |
 |------------|--------|--------|
@@ -34,6 +18,19 @@ Fake benchmark scores across different test suites. Not from a real run—for il
 | **p50 latency** | 34 ms | Median time per check |
 | **p99 latency** | 127 ms | 99th percentile |
 | **Throughput** | ~2,400/s | Checks per second per instance (sustained) |
+
+---
+
+## What it does (simple)
+
+1. **Checks every input** — Before your agent sees it. Looks for prompt injection, hijacking, and other attacks.
+2. **Checks every response** — Optional. Catches mismatched or suspicious agent output.
+3. **Watches behavior** — Tracks each agent over time and flags when behavior drifts from normal.
+4. **Recovers automatically** — If something’s wrong (e.g. compromised agent), it reroutes to a fallback instead of failing.
+5. **Learns** — You can send feedback (this was a threat / this was fine); it updates what it treats as dangerous.
+6. **Scales** — Optional Redis mode so many instances can share state and load.
+
+So: **one place to secure, monitor, and recover your AI traffic.**
 
 ---
 
