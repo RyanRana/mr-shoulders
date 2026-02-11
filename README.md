@@ -17,18 +17,23 @@ So: **one place to secure, monitor, and recover your AI traffic.**
 
 ---
 
-## Stats at a glance
+## Benchmarks (illustrative)
 
-| What | Value |
-|------|--------|
-| **Detection layers** | 4 (semantic with embeddings, behavioral, contextual, ML anomaly) — parallel |
-| **Failure detection rate** | % of checks that were threats (from `GET /metrics` → `failure_detection_rate_pct`) |
-| **Reroute success rate** | % of reroutes that succeeded (from `GET /metrics` → `reroute_success_rate_pct`) |
-| **Max check time** | 5 s (then fail-safe block) |
-| **Result cache** | 2 s TTL, 2,048 entries |
-| **Threat threshold** | 0.7 confidence to block |
-| **Redis connections** | 32 (when distributed) |
-| **Python** | 3.8+ |
+Fake benchmark scores across different test suites. Not from a real run—for illustration only.
+
+| Test suite | Score | Notes |
+|------------|--------|--------|
+| **Prompt injection** | 96.4% | Detection rate on 500 hand-crafted + templated injection prompts |
+| **Goal hijacking** | 91.2% | Multi-turn drift and “ignore instructions” style hijacks |
+| **Code injection** | 94.8% | Shell, eval, and inline code snippets in input/response |
+| **Jailbreak / bypass** | 89.7% | Role-play and “you are now…” style bypass attempts |
+| **Context / response mismatch** | 88.3% | Input–response alignment (hallucination-style mismatch) |
+| **Behavioral anomaly** | 92.1% | Rate/length/pattern drift vs per-agent baseline |
+| **False positive rate** | 0.8% | Benign traffic (normal queries) incorrectly blocked |
+| **Reroute success** | 98.2% | Successful fallback when a threat triggered reroute |
+| **p50 latency** | 34 ms | Median time per check |
+| **p99 latency** | 127 ms | 99th percentile |
+| **Throughput** | ~2,400/s | Checks per second per instance (sustained) |
 
 ---
 
